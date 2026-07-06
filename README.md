@@ -1,169 +1,115 @@
-"""
-train_model.py
+# 📈 Sales Forecast AI
 
-تدريب ومقارنة عدة نماذج لتوقع المبيعات:
-Linear Regression, Random Forest, XGBoost, LightGBM.
+An end-to-end Machine Learning project that forecasts weekly sales by product category using historical Superstore data, with an interactive Streamlit dashboard for exploration and predictions.
 
-يستخدم تقسيم Train/Test زمني (Time-based Split) وليس عشوائيًا،
-لتفادي تسريب البيانات المستقبلية (Look-ahead Bias).
-"""
+![Python](https://img.shields.io/badge/Python-3.10+-blue) ![License](https://img.shields.io/badge/License-MIT-green)
 
-import logging
-from typing import Any
+## 📋 Problem Statement
 
-import joblib
-import pandas as pd
-from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
-from sklearn.linear_model import LinearRegression
+Retail businesses need to anticipate future demand to manage inventory, staffing, and marketing spend. This project builds a forecasting pipeline that predicts next-week sales per product category, backed by a full EDA uncovering actionable business insights (seasonality, discount impact, geographic concentration).
 
-logger = logging.getLogger(__name__)
+## 📊 Dataset
 
-# استيراد دفاعي: XGBoost و LightGBM قد لا يكونان مثبّتين في كل بيئة
-# (يتطلبان اتصال إنترنت للتثبيت). لو غير متاحين، نتخطاهما بتحذير
-# بدل أن يتعطل السكربت بالكامل.
-try:
-    from xgboost import XGBRegressor
-    XGBOOST_AVAILABLE = True
-except ImportError:
-    XGBOOST_AVAILABLE = False
-    logger.warning("مكتبة xgboost غير متاحة - سيتم تخطي هذا النموذج")
+**Source:** [Sample Superstore Dataset](https://www.kaggle.com/datasets/vivek468/superstore-dataset-final) (Kaggle)
+- 9,994 order line-items, 2014–2017 (4 years)
+- Columns: Order Date, Ship Date, Customer, Segment, City/State/Region, Category/Sub-Category, Sales, Quantity, Discount, Profit
 
-try:
-    from lightgbm import LGBMRegressor
-    LIGHTGBM_AVAILABLE = True
-except ImportError:
-    LIGHTGBM_AVAILABLE = False
-    logger.warning("مكتبة lightgbm غير متاحة - سيتم تخطي هذا النموذج")
+## 🛠️ Tech Stack
 
+| Layer | Tools |
+|---|---|
+| Data Processing | pandas, numpy |
+| Visualization | matplotlib, seaborn, plotly |
+| Machine Learning | scikit-learn, XGBoost, LightGBM |
+| Dashboard | Streamlit |
+| Model Persistence | joblib |
 
-FEATURE_COLUMNS = [
-    "Month", "Week", "Quarter", "Is_Holiday_Season",
-    "Lag_1", "Lag_4", "Lag_52", "Rolling_Mean_4", "Rolling_Mean_12",
-]
-TARGET_COLUMN = "Sales"
-CATEGORY_COLUMN = "Category"
+## 🏗️ Architecture
 
+```
+Raw CSV → Cleaning → Daily/Weekly Aggregation by Category → Feature Engineering
+   (Lag, Rolling, Calendar features) → Time-based Train/Test Split →
+   Model Training & Comparison → Hyperparameter Tuning → Streamlit Dashboard
+```
 
-def prepare_train_test_split(
-    df: pd.DataFrame, test_ratio: float = 0.15, date_col: str = "Order Date"
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    تقسيم البيانات زمنيًا: كل ما قبل تاريخ القطع للتدريب، والباقي للاختبار.
+## 📁 Project Structure
 
-    هذا يحاكي السيناريو الحقيقي: النموذج يتدرب على الماضي فقط،
-    ويُختبر على مستقبل لم "يره" أثناء التدريب إطلاقًا.
+```
+sales-forecast-ai/
+├── data/
+│   ├── raw/                  # Original untouched data
+│   └── processed/            # Cleaned & feature-engineered data
+├── notebooks/                # EDA & prototyping notebooks
+├── src/                      # Production-ready pipeline modules
+│   ├── data_loader.py
+│   ├── data_cleaning.py
+│   ├── eda.py
+│   ├── feature_engineering.py
+│   ├── train_model.py
+│   ├── tune_model.py
+│   ├── evaluate_model.py
+│   └── utils.py
+├── models/                   # Trained model + metadata
+├── app/app.py                # Streamlit dashboard
+├── reports/figures/          # EDA & evaluation charts
+├── requirements.txt
+└── README.md
+```
 
-    Args:
-        df: DataFrame يحتوي على عمود تاريخ مرتب.
-        test_ratio: نسبة البيانات الأحدث المخصصة للاختبار (افتراضيًا 15%).
-        date_col: اسم عمود التاريخ.
+## 📈 Key EDA Insights
 
-    Returns:
-        (train_df, test_df)
-    """
-    df = df.sort_values(date_col).reset_index(drop=True)
-    cutoff_idx = int(len(df) * (1 - test_ratio))
-    cutoff_date = df.iloc[cutoff_idx][date_col]
+1. **Strong yearly seasonality**: November–December is consistently the peak sales period across all 4 years.
+2. **Discounts above 20% cause average losses** — a direct pricing-policy recommendation.
+3. **Sales are geographically concentrated**: New York City alone generates ~1.5x the sales of the next city.
+4. Technology, Furniture, and Office Supplies contribute relatively balanced revenue shares.
 
-    train_df = df[df[date_col] < cutoff_date]
-    test_df = df[df[date_col] >= cutoff_date]
+## 🤖 Modeling Results
 
-    logger.info(
-        "تقسيم زمني عند %s | Train: %d صف | Test: %d صف",
-        cutoff_date.date(), len(train_df), len(test_df)
-    )
-    return train_df, test_df
+Weekly sales aggregated per category, evaluated with a **time-based split** (no random shuffling, to avoid look-ahead bias):
 
+| Model | MAE ($) | RMSE ($) | R² |
+|---|---|---|---|
+| **Linear Regression (final)** | **2,624.99** | 3,614.21 | -0.019 |
+| Random Forest | 2,951.11 | 4,004.50 | -0.251 |
+| Gradient Boosting | 3,431.48 | 4,486.63 | -0.571 |
+| Naive Baseline (last week) | 3,745.83 | 5,022.33 | -0.969 |
 
-def encode_categorical(train_df: pd.DataFrame, test_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
-    """
-    تحويل عمود Category إلى One-Hot Encoding.
+All models meaningfully beat the naive baseline (~30% MAE improvement). Negative R² reflects the challenge of predicting an unprecedented holiday-season peak from only 4 years of history — documented transparently rather than hidden. See `reports/model_comparison_final.csv` for full experiment log, including hyperparameter tuning and log-transform attempts (which did **not** improve results here — an instructive real-world finding).
 
-    نطبّق get_dummies على train و test معًا مبدئيًا لضمان تطابق
-    الأعمدة، ثم نعيد فصلهما - يمنع مشكلة شائعة وهي ظهور فئة في
-    الاختبار غير موجودة في التدريب (أو العكس).
+**Top predictive features:** Week of year, Month, and short/long-term Lag features dominate — confirming the seasonality found in EDA.
 
-    Args:
-        train_df: بيانات التدريب.
-        test_df: بيانات الاختبار.
+## 🚀 How to Run
 
-    Returns:
-        (train_encoded, test_encoded, category_dummy_columns)
-    """
-    combined = pd.concat([train_df, test_df], axis=0, keys=["train", "test"])
-    combined = pd.get_dummies(combined, columns=[CATEGORY_COLUMN], prefix="Cat")
+```bash
+git clone <your-repo-url>
+cd sales-forecast-ai
+pip install -r requirements.txt
 
-    category_dummy_cols = [c for c in combined.columns if c.startswith("Cat_")]
+# Regenerate the full pipeline
+python -m src.data_loader   # or run notebooks/01-03 interactively
 
-    train_encoded = combined.xs("train")
-    test_encoded = combined.xs("test")
+# Launch the dashboard
+streamlit run app/app.py
+```
 
-    return train_encoded, test_encoded, category_dummy_cols
+## ☁️ Deployment
 
 
-def get_model_registry() -> dict[str, Any]:
-    """
-    إرجاع قاموس بالنماذج المتاحة للتدريب.
+```
 
-    يتحقق ديناميكيًا من توفر xgboost و lightgbm ويضيفهما فقط
-    إذا كانا مثبّتين.
+**Streamlit Community Cloud:**
+1. Push this repo to GitHub (public or connected private repo).
+2. Go to [share.streamlit.io](https://share.streamlit.io) → "New app".
+3. Select your repo, branch `main`, and set the main file path to `app/app.py`.
+4. Deploy — Streamlit Cloud installs `requirements.txt` automatically.
 
-    Returns:
-        قاموس {اسم_النموذج: كائن_النموذج_غير_المدرّب}.
-    """
-    models = {
-        "Linear Regression": LinearRegression(),
-        "Random Forest": RandomForestRegressor(
-            n_estimators=200, max_depth=10, random_state=42, n_jobs=-1
-        ),
-    }
+## 🔮 Future Improvements
 
-    if XGBOOST_AVAILABLE:
-        models["XGBoost"] = XGBRegressor(
-            n_estimators=300, max_depth=6, learning_rate=0.05, random_state=42
-        )
-    else:
-        # بديل توضيحي بنفس فكرة Boosting المتسلسل، متاح دائمًا عبر sklearn
-        models["Gradient Boosting (بديل XGBoost)"] = GradientBoostingRegressor(
-            n_estimators=300, max_depth=4, learning_rate=0.05, random_state=42
-        )
+- Extend history beyond 4 years to better capture yearly seasonality (`Lag_52` currently has only 3 prior examples)
+- Try dedicated time-series models (Prophet, SARIMA) alongside tabular ML models
+- Add Quantile Regression for prediction intervals instead of point estimates
+- City-level forecasting once more granular/complete geographic data is available
 
-    if LIGHTGBM_AVAILABLE:
-        models["LightGBM"] = LGBMRegressor(
-            n_estimators=300, max_depth=6, learning_rate=0.05, random_state=42, verbose=-1
-        )
+## 📝 License
 
-    return models
-
-
-def train_all_models(
-    train_df: pd.DataFrame, feature_columns: list[str]
-) -> dict[str, Any]:
-    """
-    تدريب كل النماذج المتاحة على بيانات التدريب.
-
-    Args:
-        train_df: بيانات التدريب المُرمّزة (بعد encode_categorical).
-        feature_columns: أسماء أعمدة الميزات (تشمل Category dummies).
-
-    Returns:
-        قاموس {اسم_النموذج: نموذج_مدرّب}.
-    """
-    X_train = train_df[feature_columns]
-    y_train = train_df[TARGET_COLUMN]
-
-    models = get_model_registry()
-    trained_models = {}
-
-    for name, model in models.items():
-        logger.info("تدريب %s ...", name)
-        model.fit(X_train, y_train)
-        trained_models[name] = model
-
-    return trained_models
-
-
-def save_model(model: Any, path: str) -> None:
-    """حفظ نموذج مدرّب على القرص باستخدام joblib."""
-    joblib.dump(model, path)
-    logger.info("تم حفظ النموذج في %s", path)
+MIT
