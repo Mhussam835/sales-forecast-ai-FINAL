@@ -1,0 +1,6 @@
+Model,MAE,RMSE,R2
+"Linear Regression (Stage 6, no holiday)",2624.99,3614.21,-0.019
+Linear Regression (+ Holiday feature),2742.5297997156204,3705.3280063927314,-0.07147484675862148
+Random Forest (+ Holiday feature),2926.9720222369547,3986.0908413011207,-0.24000388535881045
+Linear Regression (log + holiday),3114.48,4175.21,-0.3605
+Random Forest (Tuned + log),3166.26,4306.77,-0.4475

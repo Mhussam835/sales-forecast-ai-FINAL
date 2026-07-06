@@ -1,0 +1,129 @@
+"""
+app.py - Sales Forecast AI Dashboard
+
+Interactive Streamlit dashboard for exploring historical sales data
+and viewing category-level sales forecasts.
+"""
+
+import json
+from pathlib import Path
+
+import joblib
+import pandas as pd
+import plotly.express as px
+import streamlit as st
+
+st.set_page_config(page_title="Sales Forecast AI", page_icon="📈", layout="wide")
+
+ROOT = Path(__file__).parent.parent
+
+
+@st.cache_data
+def load_data() -> pd.DataFrame:
+    df = pd.read_csv(ROOT / "data/processed/superstore_clean.csv", parse_dates=["Order Date", "Ship Date"])
+    return df
+
+
+@st.cache_data
+def load_features() -> pd.DataFrame:
+    df = pd.read_csv(ROOT / "data/processed/superstore_features_weekly.csv", parse_dates=["Order Date"])
+    return df
+
+
+@st.cache_resource
+def load_model():
+    model = joblib.load(ROOT / "models/best_model.pkl")
+    with open(ROOT / "models/feature_columns.json") as f:
+        feature_columns = json.load(f)
+    return model, feature_columns
+
+
+df = load_data()
+features_df = load_features()
+model, feature_columns = load_model()
+
+st.title("📈 Sales Forecast AI Dashboard")
+st.caption("Superstore Sales — Historical Analysis & Weekly Forecast by Category")
+
+# ── Sidebar filters ──────────────────────────────────────────────
+st.sidebar.header("Filters")
+categories = sorted(df["Category"].unique())
+selected_category = st.sidebar.selectbox("Product Category", categories)
+
+cities = sorted(df["City"].unique())
+selected_city = st.sidebar.selectbox("City (historical view only)", ["All Cities"] + cities)
+
+filtered = df[df["Category"] == selected_category]
+if selected_city != "All Cities":
+    filtered = filtered[filtered["City"] == selected_city]
+
+# ── KPI Cards ─────────────────────────────────────────────────────
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Total Sales", f"${filtered['Sales'].sum():,.0f}")
+col2.metric("Total Orders", f"{filtered['Order ID'].nunique():,}")
+col3.metric("Avg Order Value", f"${filtered['Sales'].mean():,.2f}")
+col4.metric("Total Profit", f"${filtered['Profit'].sum():,.0f}")
+
+st.divider()
+
+# ── Historical trend chart ───────────────────────────────────────
+st.subheader(f"Historical Weekly Sales — {selected_category}")
+cat_weekly = features_df[features_df["Category"] == selected_category]
+fig1 = px.line(cat_weekly, x="Order Date", y="Sales", markers=True)
+fig1.update_traces(line_color="#2563eb")
+st.plotly_chart(fig1, use_container_width=True)
+
+col_a, col_b = st.columns(2)
+with col_a:
+    st.subheader("Sales by City (Top 10)")
+    city_sales = filtered.groupby("City")["Sales"].sum().sort_values(ascending=False).head(10)
+    fig2 = px.bar(city_sales, orientation="h")
+    fig2.update_layout(showlegend=False, xaxis_title="Sales ($)", yaxis_title="")
+    st.plotly_chart(fig2, use_container_width=True)
+
+with col_b:
+    st.subheader("Discount vs Profit")
+    fig3 = px.scatter(filtered, x="Discount", y="Profit", opacity=0.4, color_discrete_sequence=["#dc2626"])
+    st.plotly_chart(fig3, use_container_width=True)
+
+st.divider()
+
+# ── Forecast section ─────────────────────────────────────────────
+st.subheader(f"🔮 Next Week Sales Forecast — {selected_category}")
+
+latest_row = cat_weekly.sort_values("Order Date").iloc[[-1]].copy()
+X_pred = latest_row.reindex(columns=feature_columns, fill_value=0)
+
+# Update category one-hot columns to match selection
+for col in feature_columns:
+    if col.startswith("Cat_"):
+        X_pred[col] = 1 if col == f"Cat_{selected_category}" else 0
+
+prediction = model.predict(X_pred)[0]
+last_actual = latest_row["Sales"].values[0]
+
+fcol1, fcol2 = st.columns(2)
+fcol1.metric("Predicted Next Week Sales", f"${prediction:,.2f}")
+fcol2.metric(
+    "vs Last Recorded Week",
+    f"${prediction - last_actual:,.2f}",
+    delta=f"{((prediction - last_actual) / max(last_actual, 1)) * 100:.1f}%",
+)
+
+result_df = pd.DataFrame({
+    "Category": [selected_category],
+    "Forecast_Date": [latest_row["Order Date"].values[0]],
+    "Predicted_Sales": [prediction],
+})
+
+st.download_button(
+    label="📥 Download Prediction (CSV)",
+    data=result_df.to_csv(index=False),
+    file_name=f"forecast_{selected_category.lower().replace(' ', '_')}.csv",
+    mime="text/csv",
+)
+
+st.caption(
+    "⚠️ Model trained on 4 years of Superstore data. MAE ≈ $2,625/week. "
+    "Predictions during unprecedented holiday-season spikes carry higher uncertainty."
+)

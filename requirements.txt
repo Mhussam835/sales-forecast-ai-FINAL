@@ -1,0 +1,72 @@
+"""
+evaluate_model.py
+
+حساب مقاييس تقييم النماذج (MAE, RMSE, R²) ومقارنتها.
+"""
+
+import logging
+from typing import Any
+
+import numpy as np
+import pandas as pd
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+logger = logging.getLogger(__name__)
+
+
+def evaluate_model(model: Any, X_test: pd.DataFrame, y_test: pd.Series) -> dict[str, float]:
+    """
+    حساب MAE, RMSE, R² لنموذج واحد على بيانات الاختبار.
+
+    شرح المقاييس:
+        - MAE (Mean Absolute Error): متوسط الخطأ المطلق بنفس وحدة
+          الهدف ($). سهل التفسير: "النموذج يخطئ بمعدل X دولار".
+        - RMSE (Root Mean Squared Error): يعاقب الأخطاء الكبيرة أكثر
+          من MAE (بسبب التربيع) - مهم لو الأخطاء الكبيرة مكلفة تجاريًا.
+        - R² (Coefficient of Determination): نسبة من التباين في الهدف
+          يفسّرها النموذج (1.0 = مثالي، 0 = لا أفضل من التنبؤ بالمتوسط
+          دائمًا، سالب = أسوأ من ذلك).
+
+    Args:
+        model: نموذج مدرّب له دالة predict().
+        X_test: ميزات الاختبار.
+        y_test: القيم الحقيقية للاختبار.
+
+    Returns:
+        قاموس {"MAE": ..., "RMSE": ..., "R2": ...}
+    """
+    y_pred = model.predict(X_test)
+
+    mae = mean_absolute_error(y_test, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    r2 = r2_score(y_test, y_pred)
+
+    return {"MAE": mae, "RMSE": rmse, "R2": r2}
+
+
+def compare_models(
+    trained_models: dict[str, Any], X_test: pd.DataFrame, y_test: pd.Series
+) -> pd.DataFrame:
+    """
+    تقييم كل النماذج المدرّبة وإرجاع جدول مقارنة مرتّب حسب الأداء.
+
+    Args:
+        trained_models: قاموس {اسم_النموذج: نموذج_مدرّب}.
+        X_test: ميزات الاختبار.
+        y_test: القيم الحقيقية للاختبار.
+
+    Returns:
+        DataFrame بأعمدة [Model, MAE, RMSE, R2] مرتّب تصاعديًا حسب MAE
+        (الأفضل أولًا).
+    """
+    results = []
+    for name, model in trained_models.items():
+        metrics = evaluate_model(model, X_test, y_test)
+        results.append({"Model": name, **metrics})
+        logger.info(
+            "%s -> MAE=%.2f, RMSE=%.2f, R2=%.4f",
+            name, metrics["MAE"], metrics["RMSE"], metrics["R2"]
+        )
+
+    results_df = pd.DataFrame(results).sort_values("MAE").reset_index(drop=True)
+    return results_df
